@@ -15,8 +15,8 @@ NTPClient timeClient(ntpUDP);
 
 const char* ssid = "AT-Developer-24G";
 const char* password = "ATWifi2020";
-const uint16_t port = 77;
-const char * host = "192.168.1.122";
+const uint16_t port = 2050;
+const char * host = "103.246.17.19";
 
 Schedular readTempTask;
 Schedular checkPowerTask;
@@ -28,38 +28,26 @@ long endTime = 0.0;
 int sensitive = 185, offset = 2504, indCurrent;
 char msg[50], power = 'N';
 String formattedDate,dayStamp,timeStamp;
-String date;
+String date, times;
+uint32_t datelong, timeslong;
 
-void sendData() {
-  snprintf (msg, 75, "%s,%s,%c", MAC.c_str(), temp_hex.c_str(), power);
-  WiFiClient client;
+//void sendData() {
+//  snprintf (msg, 75, "%s,%s,%c", MAC.c_str(), temp_hex.c_str(), power);
+//  WiFiClient client;
+//
+//  if (!client.connect(host, port)) {
+//    Serial.println("Connection to host failed");
+//    return;
+//  }
+//  Serial.println(msg);
+//  client.print(msg);
+//  delay(10);
+//  client.stop();
+//}
 
-  if (!client.connect(host, port)) {
-    Serial.println("Connection to host failed");
-    return;
-  }
-  Serial.println(msg);
-  client.print(msg);
-  delay(10);
-  client.stop();
-}
 
-String getValue(String data, char separator, int index)
-{
-  int found = 0;
-  int strIndex[] = {0, -1};
-  int maxIndex = data.length() - 1;
 
-  for (int i = 0; i <= maxIndex && found <= index; i++) {
-    if (data.charAt(i) == separator || i == maxIndex) {
-      found++;
-      strIndex[0] = strIndex[1] + 1;
-      strIndex[1] = (i == maxIndex) ? i + 1 : i;
-    }
-  }
-
-  return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
-}
+//***********************GET MAC**************************
 
 void getMAC() {
   String mac = WiFi.macAddress();
@@ -75,6 +63,8 @@ void getMAC() {
   MAC = arr;
 }
 
+//********************GET CURRENT AVG**********************
+
 double getCurrentAvg() {
   int count = 200;
   double sum = 0;
@@ -85,12 +75,16 @@ double getCurrentAvg() {
   return val;
 }
 
+//***********************GET CURRENT***********************
+
 double getCurrent() {
   int raw = analogRead(35);
   double volt = (raw / 1024.0) * 5000;
   double current = (volt - offset) / sensitive;
   return current;
 }
+
+//***********************INITPOWER***********************
 
 int initPower() {
   double tmp = 9999;
@@ -105,6 +99,8 @@ int initPower() {
   return ind - 1;
 }
 
+//***********************CHECKPOWER***********************
+
 void checkPower() {
   int nowCurrent = int(getCurrentAvg());
   if (nowCurrent < indCurrent) {
@@ -114,6 +110,8 @@ void checkPower() {
   }
 }
 
+//***********************READ TEMP***********************
+
 void readTemp() {
   sensors.requestTemperatures();
   float temp = sensors.getTempCByIndex(0);
@@ -122,6 +120,8 @@ void readTemp() {
   temp_hex.toUpperCase();
   delay(1000);
 }
+
+//***********************GET DATE***********************
 
 void getDate() {
   formattedDate = timeClient.getFormattedDate();
@@ -139,8 +139,6 @@ void getDate() {
     i++;
   }
   dayStamp = stackDay.substring(2,8);
-  int dayInt = dayStamp.toInt();
-  dayStamp = String(dayInt, HEX);
   
   while (j < timeStamp.length()) {
     if (timeStamp.charAt(j) == ':') {
@@ -149,23 +147,34 @@ void getDate() {
     }
     j++;
   }
-  timeStamp = stackTime.substring(0,4);
-  int timeInt = timeStamp.toInt();
-  timeStamp = String(timeInt, HEX);
-  date = dayStamp + timeStamp;
+  timeStamp = stackTime.substring(0,6);
+  
+//  date = dayStamp + timeStamp;
+  datelong = dayStamp.toInt();
+  timeslong = timeStamp.toInt();
+  times = String(timeslong, HEX);
+  date = String(datelong, HEX);
   date.toUpperCase();
+  times.toUpperCase();
 }
+
+//***********************SETUP***********************
 
 void setup(void) {
   Serial.begin(115200);
+  Serial.println();
+  Serial.println();
   Serial.println("TEMPERATURES DEVICE");
+  
+  Serial.println("INITIAL POWER");
+  indCurrent = initPower();
 
   while (MAC.length() < 1) {
     getMAC();
   }
 
   Serial.println();
-  Serial.print("Connecting to ");
+  Serial.print("WiFi CONNECTING TO :  ");
   Serial.println(ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -173,27 +182,32 @@ void setup(void) {
     Serial.print(".");
   }
   Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
+  Serial.println("WiFi CONNECTED");
+  Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
   timeClient.begin();
   timeClient.setTimeOffset(7*3600);
 
+  Serial.println();
+  Serial.print("CONNECTING TO :  ");
+  Serial.print(host);
+  Serial.print(":");
+  Serial.println(port);
   while (!client.connect(host, port)) {
     delay(500);
     Serial.print("*");
   }
+  Serial.println("SOCKET CONNECTED");
 
   sensors.begin();
-
-  indCurrent = initPower();
-  Serial.println(indCurrent);
 
   readTempTask.start();
   checkPowerTask.start();
   sendDataTask.start();
 }
+
+//***********************LOOP***********************
 
 void loop(void) {
   readTempTask.check(readTemp, 3000);
@@ -212,7 +226,7 @@ void loop(void) {
     long nowtime = millis();
     if (nowtime - endTime > 10000) {
       endTime = nowtime;
-      snprintf (msg, 75, "%s,%s,%s,%c", date.c_str(), MAC.c_str(), temp_hex.c_str(), power);
+      snprintf (msg, 75, "%s,%s,%s,%s,%c", times.c_str() ,date.c_str(), MAC.c_str(), temp_hex.c_str(), power);
       Serial.println(msg);
       client.println(msg);
     }
