@@ -5,18 +5,29 @@
 #include <WiFiUdp.h>
 #include <PubSubClient.h>
 #include <NTPClient.h>
+#include <Adafruit_NeoPixel.h>
 
+#define LED_PIN 15
+#define LED_COUNT 1
 #define ONE_WIRE_BUS 4
+#define ONE_WIRE_BUS_2 5
+#define ONE_WIRE_BUS_3 21
 OneWire oneWire(ONE_WIRE_BUS);
+OneWire oneWire2(ONE_WIRE_BUS_2);
+OneWire oneWire3(ONE_WIRE_BUS_3);
 DallasTemperature sensors(&oneWire);
+DallasTemperature sensors2(&oneWire2);
+DallasTemperature sensors3(&oneWire3);
 WiFiClient client;
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP);
+Adafruit_NeoPixel strip(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
 
-const char* ssid = "AT-Developer-24G";
-const char* password = "ATWifi2020";
+
+const char* ssid = "AndamanTemp";
+const char* password = "temp2020";
 const uint16_t port = 2050;
-const char * host = "103.246.17.19";
+const char * host = "dnscold-room.attg.cc";
 
 Schedular readTempTask;
 Schedular checkPowerTask;
@@ -63,62 +74,69 @@ void getMAC() {
   MAC = arr;
 }
 
-//********************GET CURRENT AVG**********************
-
-double getCurrentAvg() {
-  int count = 200;
-  double sum = 0;
-  for (int i = 0; i < count; i++) {
-    sum += getCurrent();
-  }
-  double val = sum / count;
-  return val;
-}
-
-//***********************GET CURRENT***********************
-
-double getCurrent() {
-  int raw = analogRead(35);
-  double volt = (raw / 1024.0) * 5000;
-  double current = (volt - offset) / sensitive;
-  return current;
-}
-
-//***********************INITPOWER***********************
-
-int initPower() {
-  double tmp = 9999;
-  for (int i = 0; i < 100; i++) {
-    double current = getCurrentAvg();
-    if (current < tmp) {
-      tmp = current;
-    }
-    delay(100);
-  }
-  int ind = int(tmp);
-  return ind - 1;
-}
 
 //***********************CHECKPOWER***********************
 
 void checkPower() {
-  int nowCurrent = int(getCurrentAvg());
-  if (nowCurrent < indCurrent) {
-    power = 'B';
-  } else {
+  int p = digitalRead(35);
+  if(p == 1){
     power = 'P';
+  }else{
+    power = 'B';
   }
+  Serial.print("POWER STATUS: ");
+  Serial.println(digitalRead(35));
+  
 }
 
 //***********************READ TEMP***********************
 
 void readTemp() {
+//  sensors.requestTemperatures();
+//  float temp = sensors.getTempCByIndex(0);
+//  int tempInt = int(temp * 100);
+//  temp_hex = String(tempInt, HEX);
+//  temp_hex.toUpperCase();
+//  delay(1000);
   sensors.requestTemperatures();
-  float temp = sensors.getTempCByIndex(0);
-  int tempInt = int(temp * 100);
-  temp_hex = String(tempInt, HEX);
-  temp_hex.toUpperCase();
-  delay(1000);
+  float temp1 = sensors.getTempCByIndex(0);
+  delay(100);
+  sensors2.requestTemperatures();
+  float temp2 = sensors2.getTempCByIndex(0);
+  delay(100);
+  sensors3.requestTemperatures();
+  float temp3 = sensors3.getTempCByIndex(0);
+  delay(100);
+  Serial.print("TEMP 1: ");
+  Serial.print(temp1);
+  Serial.print("  TEMP 2: ");
+  Serial.print(temp2);
+  Serial.print("  TEMP 3: ");
+  Serial.println(temp3);
+  float avg = 0;
+  if(temp1 != -127.00 && temp2 != -127.00 && temp3 != -127.00){
+    avg = (temp1 + temp2 + temp3) / 3;
+  } else if(temp1 != -127.00 && temp2 != -127.00){
+    avg = (temp1 + temp2) / 2; 
+  } else if(temp1 != -127.00 && temp3 != -127.00){
+    avg = (temp1 + temp3) / 2; 
+  } else if(temp2 != -127.00 && temp3 != -127.00){
+    avg = (temp2 + temp3) / 2; 
+  } else if(temp1 != -127.00){
+    avg = temp1;
+  } else if(temp2 != -127.00){
+    avg = temp2;
+  } else if(temp3 != -127.00){
+    avg = temp3;
+  } else {
+    avg = 0;
+  }
+  if(avg != 0){
+    int tempInt = int(avg * 100);
+    temp_hex = String(tempInt);
+  } else {
+    temp_hex = "*";
+  }
 }
 
 //***********************GET DATE***********************
@@ -158,6 +176,13 @@ void getDate() {
   times.toUpperCase();
 }
 
+void colorWipe(uint32_t color, int wait) {
+  for(int i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, color);         
+    strip.show();                                                  
+  }
+}
+
 //***********************SETUP***********************
 
 void setup(void) {
@@ -165,13 +190,12 @@ void setup(void) {
   Serial.println();
   Serial.println();
   Serial.println("TEMPERATURES DEVICE");
-  
-  Serial.println("INITIAL POWER");
-  indCurrent = initPower();
 
   while (MAC.length() < 1) {
     getMAC();
   }
+
+  pinMode(35, INPUT);
 
   Serial.println();
   Serial.print("WiFi CONNECTING TO :  ");
@@ -202,6 +226,10 @@ void setup(void) {
 
   sensors.begin();
 
+  strip.begin();
+  strip.show();
+  strip.setBrightness(50);
+
   readTempTask.start();
   checkPowerTask.start();
   sendDataTask.start();
@@ -211,7 +239,11 @@ void setup(void) {
 
 void loop(void) {
   readTempTask.check(readTemp, 3000);
-  checkPowerTask.check(checkPower, 2000);
+  checkPowerTask.check(checkPower, 1000);
+
+  if(WiFi.status() != WL_CONNECTED){
+    WiFi.begin(ssid, password);
+  }
 
   while (!timeClient.update()) {
     timeClient.forceUpdate();
@@ -224,7 +256,7 @@ void loop(void) {
     }
   } else {
     long nowtime = millis();
-    if (nowtime - endTime > 10000) {
+    if (nowtime - endTime > 60000) {
       endTime = nowtime;
       snprintf (msg, 75, "%s,%s,%s,%s,%c", times.c_str() ,date.c_str(), MAC.c_str(), temp_hex.c_str(), power);
       Serial.println(msg);
@@ -241,4 +273,9 @@ void loop(void) {
     readString = "";
   }
 
+  if(power == 'P'){
+    colorWipe(strip.Color(  0, 255,   0), 50);
+  }else{
+    colorWipe(strip.Color(  255, 0,   0), 50);
+  }
 }
